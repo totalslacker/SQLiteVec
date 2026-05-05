@@ -87,11 +87,15 @@ public actor Database {
     public init(_ location: Location = .inMemory, readonly: Bool = false) throws {
         let flags = readonly ? SQLITE_OPEN_READONLY : (SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE)
         var handle: OpaquePointer?
+        // Use NOMUTEX: the Database actor serialises all access to this
+        // connection, so SQLite's per-connection mutex is redundant. FULLMUTEX
+        // causes each sqlite3_prepare_v2 to OS-block on the connection mutex,
+        // stalling Swift Concurrency cooperative threads. See issue #324 / ADR 024.
         try SQLiteVecError.check(
             sqlite3_open_v2(
                 location.description,
                 &handle,
-                flags | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI,
+                flags | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_URI,
                 nil
             )
         )
@@ -275,17 +279,20 @@ public actor Database {
             case let value as Int:
                 result = sqlite3_bind_int(stmt, Int32(index + 1), Int32(value))
             case let value as [Float]:
+                // TRANSIENT: SQLite copies the buffer. STATIC would require the
+                // Swift array to outlive sqlite3_step, which ARC doesn't guarantee
+                // under optimisation. See issue #324 / ADR 024.
                 result = sqlite3_bind_blob(
                     stmt, Int32(index + 1), value, Int32(MemoryLayout<Float>.stride * value.count),
-                    SQLITE_STATIC)
+                    SQLITE_TRANSIENT)
             case let value as [Int8]:
                 result = sqlite3_bind_blob(
                     stmt, Int32(index + 1), value, Int32(MemoryLayout<Int8>.stride * value.count),
-                    SQLITE_STATIC)
+                    SQLITE_TRANSIENT)
             case let value as [Bool]:
                 result = sqlite3_bind_blob(
                     stmt, Int32(index + 1), value, Int32(MemoryLayout<Bool>.stride * value.count),
-                    SQLITE_STATIC)
+                    SQLITE_TRANSIENT)
             default:
                 result = sqlite3_bind_null(stmt, Int32(index + 1))
             }

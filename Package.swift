@@ -45,7 +45,14 @@ let package = Package(
             name: "CSQLiteVec",
             publicHeadersPath: "include",
             cSettings: [
-                .define("SQLITE_ENABLE_FTS5")
+                .define("SQLITE_ENABLE_FTS5"),
+                // Disable global memory-stats mutex (mem0.mutex). Without this,
+                // every sqlite3_prepare_v2 call acquires a process-wide mutex,
+                // causing Swift Concurrency cooperative threads to OS-block and
+                // saturate the thread pool under concurrent test load. Equivalent
+                // to calling sqlite3_config(SQLITE_CONFIG_MEMSTATUS, 0) before
+                // any database is opened. See issue #324 / ADR 024.
+                .define("SQLITE_DEFAULT_MEMSTATUS", to: "0"),
             ]
         ),
         .testTarget(
